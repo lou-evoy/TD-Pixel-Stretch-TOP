@@ -1,23 +1,8 @@
-/* Pixel Stretch — CUDA implementation.
- *
- * Targets CUDA Toolkit 13.x (validated on 13.3.33) and CUB 3.3 (bundled in CCCL).
- * Builds a fat binary across Turing..Blackwell; see CMakeLists.txt for the gencode list.
- *
- * ============================ ALGORITHM =====================================
- * Per line (row for Horizontal, column for Vertical) we forward-fill the last
- * surviving pixel's color across the pixels that don't survive the alpha threshold.
- * This is a SEGMENTED INCLUSIVE SCAN (segments = lines): each scan element carries
- * the packed RGBA color of the most recent survivor at or before it, a "valid" bit
- * (was there a survivor yet in this line), and a "segment head" bit at line starts.
- *
- * We work in "line-order" index space k = 0..N-1, where
- *     line      = k / L       pos = k % L       L = width (H) or height (V)
- *     coord(k)  = (pos, line)  for Horizontal,  (line, pos) for Vertical
- * The same mapping is used for input read and output write.
- *
- * Pipeline:  ingest (surf read -> scan element) -> InclusiveScan -> write (scan -> surf)
- * No sort: three passes plus one scan.
- * ===========================================================================
+/* Pixel Stretch — CUDA kernels.
+ * validated: CUDA 13.3.33, CUB 3.3 (CCCL); fat binary Turing..Blackwell.
+ * per line, forward-fill last survivor's color over sub-threshold pixels via a
+ * segmented inclusive scan (no sort). line-order k: line=k/L, pos=k%L.
+ * pipeline: ingest -> InclusiveScan -> write.
  */
 
 #include "PixelStretchCUDA.h"
@@ -30,10 +15,7 @@
 
 namespace pixelstretch {
 
-// --------------------------- scan element layout ----------------------------
-// Forward scan element (uint64): bit63 = segment head (line start), bit62 = valid (a
-// survivor seen in this line at/before here), bits 32..45 = survivor's within-line
-// position (14 bits, <=16383), bits 0..31 = its packed RGBA color.
+// scan element (uint64): bit63 segHead, bit62 valid, bits32..45 within-line pos (14b), bits0..31 RGBA
 static constexpr unsigned long long SEG = 1ull << 63;
 static constexpr unsigned long long VAL = 1ull << 62;
 static constexpr unsigned long long COLOR_MASK = 0xFFFFFFFFull;
@@ -45,10 +27,7 @@ unsigned long long packElem(bool segHead, bool valid, uint32_t pos, uint32_t col
          | ((unsigned long long)(pos & 0x3FFFu) << 32) | (unsigned long long)color;
 }
 
-// Classic segmented-inclusive-scan combine. The underlying op is "right survivor
-// wins, else carry left". A right element that begins a new segment (line) blocks any
-// carry from the left. Associative. The carried "value part" (~SEG) bundles valid +
-// survivor position + color, so they all travel together.
+// segmented-scan combine: right survivor wins, else carry left; new segment blocks carry
 struct StretchOp
 {
     __host__ __device__ __forceinline__
@@ -63,9 +42,7 @@ struct StretchOp
     }
 };
 
-// The backward scan uses the SAME element format and StretchOp, but with the segment
-// head at each line's LAST pixel and scanned over reverse iterators — yielding the NEXT
-// survivor (color + position) at/after each pixel. So both fill directions are available.
+// backward scan: same format/op, segHead at line end + reverse iterators -> next survivor
 
 static __host__ __device__ __forceinline__ int divUp(int a, int b)
 {
@@ -88,7 +65,7 @@ static __device__ __forceinline__ float4 toRGBA(uchar4 c, bool bgra)
     return make_float4(r * inv, g * inv, b * inv, a * inv);
 }
 
-// Criterion scalar in [0,1]. Matches the Pixel Sort TOP's definitions (Rec.709 luma, HSV).
+// criterion scalar [0,1] (Rec.709 luma, HSV)
 static __device__ __forceinline__ float channelValue(float4 c, Channel chan)
 {
     switch (chan)
@@ -123,11 +100,7 @@ static __device__ __forceinline__ float channelValue(float4 c, Channel chan)
     }
 }
 
-// --------------------------------- kernels ----------------------------------
-
-// 1. Read each pixel, decide if it survives the alpha threshold, emit a scan element.
-//    survive = alpha(byte) > keptThreshInt, where keptThreshInt is host-mapped so that
-//    threshold=1 -> keptThreshInt=-1 (all survive) and threshold=0 -> 255 (none survive).
+// 1. read pixel, test threshold, emit scan element
 __global__ void ingestKernel(
     cudaSurfaceObject_t inSurf, int width, int height, Axis axis, bool bgra,
     Channel criterion, int keptThreshInt, bool wantFwd, bool wantBack,
@@ -145,24 +118,19 @@ __global__ void ingestKernel(
         uint32_t color = (uint32_t)c.x | ((uint32_t)c.y << 8)
                        | ((uint32_t)c.z << 16) | ((uint32_t)c.w << 24);
 
-        // Survive when the chosen criterion passes the threshold. critByte in 0..255 is
-        // compared against keptThreshInt in -1..255 (host-mapped: threshold=1 -> -1 so
-        // everything survives; threshold=0 -> 255 so nothing does).
+        // survive when criterion byte > keptThreshInt (host-mapped from threshold)
         float crit = channelValue(toRGBA(c, bgra), criterion);
         int critByte = (int)(fminf(fmaxf(crit, 0.0f), 1.0f) * 255.0f + 0.5f);
         bool survive = critByte > keptThreshInt;
         int pos = k - (k / L) * L;
 
         if (wantFwd)  scan[k]     = packElem(pos == 0,       survive, (uint32_t)pos, color);
-        // Backward element: segment head at the line END (first element in reverse).
+        // backward: segHead at line end
         if (wantBack) scanBack[k] = packElem(pos == (L - 1), survive, (uint32_t)pos, color);
     }
 }
 
-// 3. Write the result: each pixel shows the carried survivor color, or transparent
-//    black if no survivor has occurred yet in its line. When 'fade' is set, the held
-//    region ramps from the survivor color to black across the section (scanBack gives
-//    the section end = next survivor).
+// 3. write: carried survivor color, else transparent; optional fade to black over the section
 __global__ void writeKernel(
     const unsigned long long* __restrict__ scanFwd, const unsigned long long* __restrict__ scanBack,
     Order order, bool haveSecondary, bool fade, float fadeAmount, float stretchLength,
@@ -173,15 +141,13 @@ __global__ void writeKernel(
     const bool asc = (order == Order::Ascending);
     for (int k = blockIdx.x * blockDim.x + threadIdx.x; k < N; k += gridDim.x * blockDim.x)
     {
-        // Primary scan = the fill source for this direction; secondary = the other
-        // boundary (used to size the stretch/fade). Ascending fills from the survivor
-        // before (forward); descending from the survivor after (backward).
+        // primary = fill source; secondary = opposite boundary (sizes stretch/fade)
         unsigned long long prim = asc ? scanFwd[k] : scanBack[k];
 
         uint32_t out;
         if (!(prim & VAL))
         {
-            out = 0u;  // no survivor in the fill direction -> transparent
+            out = 0u;  // no survivor -> transparent
         }
         else
         {
@@ -192,19 +158,19 @@ __global__ void writeKernel(
 
             if (d == 0 || !haveSecondary)
             {
-                out = color;  // the survivor itself, or full-length flat hold
+                out = color;  // survivor itself or flat hold
             }
             else
             {
                 unsigned long long sec = asc ? scanBack[k] : scanFwd[k];
                 int boundary = (sec & VAL) ? (int)((sec >> 32) & 0x3FFFu)
-                                           : (asc ? L : -1);          // else the line edge
+                                           : (asc ? L : -1);          // else line edge
                 int S = asc ? (boundary - survivorPos) : (survivorPos - boundary); // >= 1
                 float stretchSpan = stretchLength * (float)S;
 
                 if ((float)d > stretchSpan)
                 {
-                    out = 0u;  // beyond the stretched length -> transparent
+                    out = 0u;  // beyond stretch -> transparent
                 }
                 else
                 {
@@ -218,7 +184,7 @@ __global__ void writeKernel(
                     uint32_t r = (uint32_t)((color & 255)        * bright + 0.5f);
                     uint32_t g = (uint32_t)(((color >> 8) & 255) * bright + 0.5f);
                     uint32_t bl= (uint32_t)(((color >> 16) & 255)* bright + 0.5f);
-                    uint32_t a = (color >> 24) & 255;      // keep the survivor's alpha
+                    uint32_t a = (color >> 24) & 255;      // keep survivor alpha
                     out = r | (g << 8) | (bl << 16) | (a << 24);
                 }
             }
@@ -229,7 +195,7 @@ __global__ void writeKernel(
     }
 }
 
-// Used when no input is connected: clear to transparent black.
+// no input: clear to transparent black
 __global__ void clearKernel(cudaSurfaceObject_t outSurf, int width, int height)
 {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
@@ -238,7 +204,7 @@ __global__ void clearKernel(cudaSurfaceObject_t outSurf, int width, int height)
     surf2Dwrite((uint32_t)0u, outSurf, x * (int)sizeof(uchar4), y, cudaBoundaryModeZero);
 }
 
-// Bypass: copy input straight to output, unaffected (native TOP bypass behavior).
+// bypass: copy input to output
 __global__ void passthroughKernel(
     cudaSurfaceObject_t inSurf, cudaSurfaceObject_t outSurf, int width, int height)
 {
@@ -249,8 +215,6 @@ __global__ void passthroughKernel(
     surf2Dread(&c, inSurf, x * (int)sizeof(uchar4), y, cudaBoundaryModeClamp);
     surf2Dwrite(c, outSurf, x * (int)sizeof(uchar4), y, cudaBoundaryModeZero);
 }
-
-// ------------------------------ PixelStretcher ------------------------------
 
 PixelStretcher::~PixelStretcher()
 {
@@ -270,15 +234,14 @@ cudaError_t PixelStretcher::ensureCapacity(int width, int height, const char** o
 {
     int64_t N = (int64_t)width * (int64_t)height;
     if (N <= myCapacity)
-        return cudaSuccess;  // reuse existing buffers (no per-frame malloc)
+        return cudaSuccess;  // reuse
 
     freeAll();
 
     PS_CUDA_RETURN(cudaMalloc(&myScan,     N * sizeof(unsigned long long)), outError);
     PS_CUDA_RETURN(cudaMalloc(&myScanBack, N * sizeof(unsigned long long)), outError);
 
-    // Temp storage must cover the forward scan and the backward (reverse-iterator)
-    // scan; both use uint64 + StretchOp. Allocate the max once.
+    // temp storage covers both scans (uint64 + StretchOp); alloc max once
     size_t fwdBytes = 0, backBytes = 0;
     PS_CUDA_RETURN(cub::DeviceScan::InclusiveScan(
         nullptr, fwdBytes, myScan, myScan, StretchOp(), (int)N), outError);
@@ -311,7 +274,7 @@ cudaError_t PixelStretcher::process(
         return cudaSuccess;
     }
 
-    // Bypass: pass the input through untouched, like a native TOP's Bypass flag.
+    // bypass
     if (p.bypass)
     {
         dim3 b(16, 16, 1);
@@ -323,17 +286,13 @@ cudaError_t PixelStretcher::process(
 
     PS_CUDA_RETURN(ensureCapacity(W, H, outError), outError);
 
-    // Map threshold so survive = alpha_byte > keptThreshInt:
-    //   threshold=1 -> keptThreshInt = -1  (alpha > -1 always -> identity)
-    //   threshold=0 -> keptThreshInt = 255 (alpha > 255 never -> blank)
+    // map threshold -> keptThreshInt: 1 => -1 (identity), 0 => 255 (blank)
     int keptThreshInt = (int)((1.0f - p.threshold) * 256.0f + 0.5f) - 1;
 
     const int BS = 256;
     int grid = std::min(divUp(N, BS), 65535 * 4);
 
-    // The "primary" scan is the fill direction (forward for Ascending, backward for
-    // Descending) and always runs. The "secondary" (opposite) scan sizes the stretch/
-    // fade and only runs when needed.
+    // primary scan = fill direction (always runs); secondary sizes stretch/fade (on demand)
     const bool asc           = (p.order == Order::Ascending);
     const bool needSecondary = p.fade || (p.stretchLength < 1.0f);
     const bool runFwd        = asc ? true : needSecondary;
@@ -344,14 +303,12 @@ cudaError_t PixelStretcher::process(
         myScan, myScanBack);
     PS_CUDA_CHECK_LAUNCH(outError);
 
-    // Forward scan: last survivor (color + position) at/before each pixel.
+    // forward scan: last survivor at/before each pixel
     if (runFwd)
         PS_CUDA_RETURN(cub::DeviceScan::InclusiveScan(
             myCubTemp, myCubTempBytes, myScan, myScan, StretchOp(), N, stream), outError);
 
-    // Backward scan: next survivor at/after each pixel. Scanning over reverse iterators
-    // turns the global left-to-right scan into a per-line right-to-left one (segment
-    // heads sit at line ends).
+    // backward scan: next survivor at/after each pixel (reverse iterators -> per-line R-to-L)
     if (runBack)
     {
         auto rb = thrust::make_reverse_iterator(myScanBack + N);

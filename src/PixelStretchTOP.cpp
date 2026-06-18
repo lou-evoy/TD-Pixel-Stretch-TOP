@@ -1,11 +1,5 @@
-/* Pixel Stretch TOP — TouchDesigner SDK glue.
- *
- * Mirrors the shipped CudaTOP sample structure (Samples/CPlusPlus/CudaTOP):
- *   - executeMode = TOP_ExecuteMode::CUDA
- *   - acquire input texture as a cudaArray via OP_TOPInput::getCUDAArray()
- *   - create the output cudaArray via TOP_Output::createCUDAArray()
- *   - wrap both as cudaSurfaceObjects, do work between begin/endCUDAOperations()
- *   - one instance-owned cudaStream_t for the node's lifetime
+/* Pixel Stretch TOP — TD SDK glue.
+ * mirrors the CudaTOP sample (Samples/CPlusPlus/CudaTOP).
  */
 #include "PixelStretchTOP.h"
 
@@ -13,8 +7,7 @@
 #include <cstdio>
 #include <algorithm>
 
-// Single source of truth for the plugin version. Bump on each release; keep the numeric
-// parts in sync with customOPInfo.major/minorVersion below.
+// keep in sync with customOPInfo.major/minorVersion below
 static const char* kVersion = "1.0.0";
 
 extern "C"
@@ -55,11 +48,8 @@ DestroyTOPInstance(TOP_CPlusPlusBase* instance, TOP_Context* context)
 
 } // extern "C"
 
-// Bind a fresh surface object to 'array'. We destroy any previous object and create a
-// new one every cook rather than caching it: when the node is bypassed and reactivated
-// TD frees the old cudaArray and re-registers its interop, so a cached surface handle
-// goes stale and probing it raises a sticky cudaErrorInvalidResourceHandle. Recreating
-// each cook is only a few microseconds and is robust.
+// recreate every cook, never cache: bypass/reactivate frees the cudaArray, leaving a
+// cached handle stale (sticky cudaErrorInvalidResourceHandle)
 static void
 setupCudaSurface(cudaSurfaceObject_t* surface, cudaArray_t array)
 {
@@ -100,8 +90,7 @@ PixelStretchTOP::getGeneralInfo(TOP_GeneralInfo* ginfo, const OP_Inputs* inputs,
 {
     ginfo->cookEveryFrame = false;
     ginfo->cookEveryFrameIfAsked = false;
-    // Keep the Version field read-only here too (runs even when no input is connected
-    // and execute would early-return).
+    // Version read-only (runs even with no input, when execute early-returns)
     if (inputs) inputs->enablePar("Version", false);
 }
 
@@ -117,7 +106,7 @@ void
 PixelStretchTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
 {
     myError = nullptr;
-    inputs->enablePar("Version", false);   // make the Version field read-only
+    inputs->enablePar("Version", false);   // read-only
 
     if (inputs->getNumInputs() < 1)
     {
@@ -154,7 +143,7 @@ PixelStretchTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
     info.textureDesc = inDesc;
     info.stream      = myStream;
 
-    // All input/parameter queries must happen BEFORE beginCUDAOperations().
+    // all input/param queries BEFORE beginCUDAOperations()
     OP_CUDAAcquireInfo acquireInfo;
     acquireInfo.stream = myStream;
     const OP_CUDAArrayInfo* inputArrayInfo = topInput->getCUDAArray(acquireInfo, nullptr);
@@ -196,8 +185,7 @@ PixelStretchTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
         myInputSurface = 0;
     }
 
-    // Swallow any benign sticky error from (re)creating surfaces (e.g. after a bypass
-    // toggle), so the launch checks inside process() only report this cook's kernels.
+    // swallow benign sticky error from surface (re)creation so process() reports only this cook
     cudaGetLastError();
 
     const char* algoError = nullptr;
@@ -219,8 +207,7 @@ PixelStretchTOP::setupParameters(OP_ParameterManager* manager, void*)
 {
     const char* page = "Stretch";
 
-    // Bypass — pass the input through untouched (the C++ TOP API does not report the
-    // node's native Bypass flag to the plugin, so we expose our own that actually works).
+    // Bypass — API doesn't report native Bypass to plugin, so expose our own
     {
         OP_NumericParameter np("Bypass");
         np.label = "Bypass";
@@ -229,7 +216,6 @@ PixelStretchTOP::setupParameters(OP_ParameterManager* manager, void*)
         OP_ParAppendResult res = manager->appendToggle(np);
         assert(res == OP_ParAppendResult::Success);
     }
-    // Stretch Axis
     {
         OP_StringParameter sp("Axis");
         sp.label = "Stretch Axis";
@@ -240,7 +226,7 @@ PixelStretchTOP::setupParameters(OP_ParameterManager* manager, void*)
         OP_ParAppendResult res = manager->appendMenu(sp, 2, names, labels);
         assert(res == OP_ParAppendResult::Success);
     }
-    // Stretch Order — fill direction along the axis.
+    // Stretch Order — fill direction
     {
         OP_StringParameter sp("Order");
         sp.label = "Stretch Order";
@@ -251,8 +237,7 @@ PixelStretchTOP::setupParameters(OP_ParameterManager* manager, void*)
         OP_ParAppendResult res = manager->appendMenu(sp, 2, names, labels);
         assert(res == OP_ParAppendResult::Success);
     }
-    // Threshold Criterion — what each pixel is thresholded on (default Luminance,
-    // matching TD's Threshold TOP). Alpha reproduces the original alpha-based mode.
+    // Threshold Criterion — Alpha reproduces the original alpha-based mode
     {
         OP_StringParameter sp("Threshcrit");
         sp.label = "Threshold Criterion";

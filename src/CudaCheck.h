@@ -1,11 +1,5 @@
-/* CUDA error-checking helpers for the Pixel Stretch TOP.
- *
- * Kernels launch asynchronously, so most launch/runtime errors only surface at a
- * later synchronizing call. We (a) check every synchronous CUDA Runtime / CUB call
- * inline, and (b) check cudaGetLastError() right after each kernel launch to catch
- * bad launch configurations. Nothing aborts: the algorithm layer returns a
- * cudaError_t and a message string to the TD glue, which puts the node into a clean
- * error state via getErrorString().
+/* CUDA error-checking helpers.
+ * async: errors surface at next sync; non-aborting (returns cudaError_t + message).
  */
 #ifndef PIXELSTRETCH_CUDA_CHECK_H
 #define PIXELSTRETCH_CUDA_CHECK_H

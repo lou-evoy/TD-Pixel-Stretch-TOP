@@ -1,7 +1,5 @@
-/* Pixel Stretch TOP — TouchDesigner Custom Operator (C++ TOP, CUDA execute mode).
- *
- * Thin SDK-facing glue. All image processing lives in PixelStretchCUDA.{h,cu}.
- * Validated against TouchDesigner 2025.32050, TOP C++ API version 12.
+/* Pixel Stretch TOP — TD SDK glue.
+ * Validated: TouchDesigner 2025.32050, TOP C++ API v12.
  */
 #ifndef PIXELSTRETCH_TOP_H
 #define PIXELSTRETCH_TOP_H
