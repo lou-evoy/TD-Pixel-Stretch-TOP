@@ -1,0 +1,25 @@
+# Build output (out-of-source CMake build)
+build/
+out/
+
+# Compiled / linked artifacts
+*.dll
+*.exe
+*.obj
+*.lib
+*.exp
+*.pdb
+*.ilk
+
+# Generated test image dumps
+*.ppm
+*.pgm
+test_*.png
+test_*.bmp
+
+# Editor / OS
+.vscode/
+.idea/
+*.user
+Thumbs.db
+.DS_Store
