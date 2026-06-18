@@ -16,7 +16,7 @@ scanline removed by a threshold. The node allows for an optional fade-to-black a
 
 ## Getting the node
 
-The compiled plugin isn't distributed here — precompiled builds will be available to supporters on **Patreon** *(link coming soon)*. To build it yourself, read on.
+The compiled plugin isn't distributed here — precompiled builds will be available on **Gumroad** *(link coming soon)*. To build it yourself, read on.
 
 ## Build it yourself
 
