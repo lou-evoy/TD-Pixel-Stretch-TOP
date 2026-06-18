@@ -16,7 +16,7 @@
  * The same mapping is used for input read and output write.
  *
  * Pipeline:  ingest (surf read -> scan element) -> InclusiveScan -> write (scan -> surf)
- * No sort. Three passes + one scan -> very fast, easily real-time at 8K.
+ * No sort: three passes plus one scan.
  * ===========================================================================
  */
 
