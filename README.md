@@ -5,8 +5,9 @@ scanline removed by a threshold. The node allows for an optional fade-to-black a
 
 ## Demo
 
-<!-- screenshots / GIFs / video go here -->
-*Coming soon.*
+<video src="https://github.com/lou-evoy/TD-Pixel-Stretch-TOP/raw/main/media/pixel-stretch-demo.mp4" controls muted loop width="100%"></video>
+
+> If the video doesn't play inline, [watch it here](media/pixel-stretch-demo.mp4).
 
 ## Why this one
 
@@ -16,7 +17,7 @@ scanline removed by a threshold. The node allows for an optional fade-to-black a
 
 ## Getting the node
 
-The compiled plugin isn't distributed here — precompiled builds will be available on **Gumroad** *(link coming soon)*. To build it yourself, read on.
+The compiled plugin isn't distributed here — precompiled builds are available on **[Gumroad](https://louevoy.gumroad.com)**. To build it yourself, read on.
 
 ## Build it yourself
 
