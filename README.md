@@ -5,9 +5,9 @@ scanline removed by a threshold. The node allows for an optional fade-to-black a
 
 ## Demo
 
-<video src="https://github.com/lou-evoy/TD-Pixel-Stretch-TOP/raw/main/media/pixel-stretch-demo.mp4" controls muted loop width="100%"></video>
+[![Pixel Stretch TOP demo](media/pixel-stretch-demo-poster.jpg)](media/pixel-stretch-demo.mp4)
 
-> If the video doesn't play inline, [watch it here](media/pixel-stretch-demo.mp4).
+▶ **[Play the demo](media/pixel-stretch-demo.mp4)** — opens in GitHub's built-in video player.
 
 ## Why this one
 
