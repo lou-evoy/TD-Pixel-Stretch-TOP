@@ -5,8 +5,7 @@ scanline removed by a threshold. The node allows for an optional fade-to-black a
 
 ## Demo
 
-<!-- To embed an inline auto-playing player: edit this README on github.com, delete the link below, then drag media/pixel-stretch-demo.mp4 into the editor. GitHub uploads it and inserts the video player automatically. -->
-[Watch the demo ▶](media/pixel-stretch-demo.mp4)
+https://github.com/user-attachments/assets/86fc6a35-1e2b-4fd0-95af-2d21d4f01ae9
 
 ## Why this one
 
