@@ -7,8 +7,6 @@ scanline removed by a threshold. The node allows for an optional fade-to-black a
 
 [![Pixel Stretch TOP demo](media/pixel-stretch-demo-poster.jpg)](media/pixel-stretch-demo.mp4)
 
-▶ **[Play the demo](media/pixel-stretch-demo.mp4)** — opens in GitHub's built-in video player.
-
 ## Why this one
 
 - **No sort.** The effect is a single segmented inclusive scan over the frame — that's what
